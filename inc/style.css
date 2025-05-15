@@ -1,0 +1,57 @@
+.smart-form-group{
+    text-align: center;
+}
+
+.smart-form-group label{
+    font-size: 31px !important;
+    font-family: Jost, sans-serif !important;
+}
+
+.smart-form-group label{
+    font-size: 31px !important;
+}
+
+.user-type-card label strong{
+    font-size: 20px !important;
+    font-family: Jost, sans-serif !important;
+    text-align: justify;
+}
+
+.user-type-card label small{
+    font-size: 16px !important;
+    font-family: Jost, sans-serif !important;
+    text-align: left;
+}
+
+.smart-from-group.button-action{
+    text-align: center;
+    margin-bottom: 50px;
+}
+
+.smart-form-group hr {
+    width: 200px;
+    margin: 41px auto !important;
+    border: 2px solid #99cc03;
+}
+
+.user-type-card label{
+    text-align: left;
+}
+
+.smart-form-group select{
+    max-width: 400px;
+    margin: 0 auto;
+    font-family: 'Jost';
+    font-size: 20px;
+    border: 2px solid #ebebeb;
+}
+
+@media (max-width: 767px) {
+    .user-type-options{
+        flex-direction: column;
+    }
+}
+
+#no-results-message{
+    margin-top: 30px;
+}
