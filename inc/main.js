@@ -27,6 +27,7 @@ jQuery(document).ready(function($) {
              //   $("#address-input").val('');
                 selectedValid = false;
             } else {
+                $(this).attr('data-district', ui.item.district ? ui.item.district : 3);
                 selectedValid = true;
                 $("#no-results-message").hide();
             }
@@ -63,6 +64,7 @@ jQuery(document).ready(function($) {
         const first = $(".firstname").val().trim();
         const last = $(".lastname").val().trim();
         const addr = $("#address-input").val().trim();
+        const district = $("#address-input").data('district');
 
         if (!first || !last || !addr || !selectedValid) {
             alert("Please select a valid address from the suggestions.");
@@ -71,8 +73,9 @@ jQuery(document).ready(function($) {
 
         const namecr = encodeURIComponent(first + " " + last);
         const address = encodeURIComponent(addr);
+        const dist = encodeURIComponent(district);
 
-        window.location.href = `/service-available/?namecr=${namecr}&addr=${address}`;
+        window.location.href = `/service-available/?namecr=${namecr}&addr=${address}&dist=${dist}`;
     });
 
     var $cards = $(".user-type-card");
@@ -110,6 +113,7 @@ jQuery(document).ready(function($) {
         const landline = $("#landline").val();
         const namecr = $("#namecr_field").val();
         const addr = $("#addr_field").val();
+        const dist = $("#dist_field").val();
 
         if (!user_type || !internet_use || !family_type || !learning || !wifi_area || !residence_size || !security_interest || !landline) {
             alert("Please complete all fields.");
@@ -131,7 +135,8 @@ jQuery(document).ready(function($) {
                 security_interest,
                 landline,
                 namecr,
-                addr
+                addr,
+                dist
             },
             success: function (response) {
                 if (response.success && response.data.redirect_url) {

@@ -187,6 +187,7 @@ function render_smart_form_shortcode() {
         ?>
         <input type="hidden" id="namecr_field" name="namecr" value="<?php echo esc_attr($_GET['namecr']); ?>">
         <input type="hidden" id="addr_field" name="addr_field" value="<?php echo esc_attr($_GET['addr']); ?>">
+        <input type="hidden" id="dist_field" name="addr_field" value="<?php echo esc_attr($_GET['dist']); ?>">
         <div class="smart-from-group button-action">
             <button type="button" class="smart-form-button">Build <?php echo esc_attr($_GET['namecr']); ?> Family Service Plan</button>
         </div>
@@ -221,6 +222,7 @@ function handle_smart_form_logic() {
 
     $name = sanitize_text_field($_POST['namecr']);
     $address = sanitize_text_field($_POST['addr']);
+    $district = sanitize_text_field($_POST['dist']);
 
     // Start by clearing the cart
     WC()->cart->empty_cart();
@@ -312,6 +314,7 @@ function handle_smart_form_logic() {
 
     WC()->session->set( 'smartform_namecr', $name );
     WC()->session->set( 'smartform_addr', $address );
+    WC()->session->set( 'smartform_dist', $district );
 
     wp_send_json_success(['redirect_url' => wc_get_cart_url() . '?smart_form=true']);
 }
@@ -323,12 +326,7 @@ add_action('woocommerce_checkout_create_order', function($order, $data) {
     }
 }, 10, 2);
 
-add_action('woocommerce_admin_order_data_after_order_details', function($order){
-    $note = $order->get_meta('_smartform_security_interest');
-    if ($note) {
-        echo '<p><strong>Security Interest:</strong> ' . esc_html($note) . '</p>';
-    }
-});
+
 
 //Ajjax call - address suggestions
 add_action('wp_ajax_nopriv_swc_address_search', 'swc_address_search');
@@ -339,7 +337,7 @@ function swc_address_search() {
     $query = sanitize_text_field($_POST['query']);
     $table = 'swc_locations';
 
-    $sql = $wpdb->prepare("SELECT DISTINCT nisc_addr1, nisc_city, nisc_st, nisc_zip 
+    $sql = $wpdb->prepare("SELECT DISTINCT nisc_addr1, nisc_city, nisc_st, nisc_zip, swc_ftech_district 
                            FROM $table 
                            WHERE CONCAT(nisc_addr1, ' ', nisc_city, ' ', nisc_st, ' ', nisc_zip) 
                            LIKE %s 
@@ -350,7 +348,7 @@ function swc_address_search() {
 
     foreach ($results as $row) {
         $address = "{$row->nisc_addr1}, {$row->nisc_city}, {$row->nisc_st} {$row->nisc_zip}";
-        $data[] = ['label' => $address, 'value' => $address];
+        $data[] = ['label' => $address, 'value' => $address, 'district' => $row->swc_ftech_district];
     }
 
     if (empty($data)) {
@@ -404,25 +402,31 @@ add_action('woocommerce_cart_calculate_fees', function($cart) {
     }
 });
 
-//Unset the session
-add_action('woocommerce_thankyou', function() {
-    WC()->session->__unset('smart_form_flag');
-});
 
 //Add  the timeslot date *required
 
 add_filter('woocommerce_checkout_fields', 'add_timetap_slot_field_to_checkout');
 function add_timetap_slot_field_to_checkout($fields) {
     $slots = get_timetap_slots_for_checkout();
-
+    //$slots = [];
 
     if (!empty($slots)) {
+        // 1. Build the select field options
+        $select_options = ['' => 'Choose a time slot'];
+        foreach ($slots as $key => $slot) {
+            $select_options[$key] = $slot['label'];
+        }
+
+        // 2. Add visible dropdown for selection
         $fields['billing']['timetap_slot'] = [
-            'type'        => 'select',
-            'label'       => __('Select Appointment Time', 'woocommerce'),
-            'required'    => true,
-            'options'     => ['' => 'Choose a time slot'] + $slots
+            'type'     => 'select',
+            'label'    => __('Select Appointment Time', 'woocommerce'),
+            'required' => true,
+            'options'  => $select_options,
         ];
+
+        // 3. Store all slot details in session for retrieval after order is placed
+        WC()->session->set('timetap_all_slots', $slots);
     }
 
     return $fields;
@@ -432,64 +436,77 @@ function get_timetap_slots_for_checkout() {
     $cached = get_transient('timetap_checkout_slots');
     //if ($cached) return $cached;
 
-    $apiKey = '361484';
-    $secret = 'b5053dc7719444fdbb2aa0fd6e44bd16'; // REPLACE with your real secret key
-    $locationId = '612616';
-    $serviceId = '645682';
 
-    $timestamp = round(microtime(true));
-    $signature = md5($apiKey . $secret);
-    $token_url = "https://api.timetap.com/live/sessionToken?apiKey=$apiKey&timestamp=$timestamp&signature=$signature";
 
-    $curl = curl_init();
+    $locationId = '498109';
+    $serviceId = '725333';
 
-    curl_setopt_array($curl, array(
-        CURLOPT_URL => $token_url,
-        CURLOPT_RETURNTRANSFER => true,
-        CURLOPT_ENCODING => '',
-        CURLOPT_MAXREDIRS => 10,
-        CURLOPT_TIMEOUT => 0,
-        CURLOPT_FOLLOWLOCATION => true,
-        CURLOPT_HTTP_VERSION => CURL_HTTP_VERSION_1_1,
-        CURLOPT_CUSTOMREQUEST => 'GET',
-    ));
+    $district   = WC()->session->get('smartform_dist');
 
-    $response = curl_exec($curl);
+    if(!empty($district) && intval($district) == 2){
+        $serviceId = '725510';
+    }
 
-    curl_close($curl);
+    if(!empty($district) && intval($district) == 3){
+        $serviceId = '725511';
+    }
 
-    $response_std = json_decode($response, true);
 
-    $token = isset($response_std['sessionToken']) ? $response_std['sessionToken'] : '';
+    $token = sc_timetap_get_token();
+
 
     if(empty($token)){
         return [];
     }
 
-
-
-    $startDate = date('Y-m-d');
-    $endDate = date('Y-m-d', strtotime('+7 days'));
-
-    $slots_url = "https://api.timetap.com/test/availability/location/$locationId/service/$serviceId?startDate=$startDate&endDate=$endDate";
-
-    $slots_response = wp_remote_get($slots_url, [
-        'headers' => ['Authorization' => "Bearer $token"]
-    ]);
-
-    $slots_data = json_decode(wp_remote_retrieve_body($slots_response), true);
-
-    if (!is_array($slots_data)) return [];
+    $slots_data = sc_timetap_get_slots($token, $locationId, $serviceId );
 
     $formatted_slots = [];
 
     foreach ($slots_data as $day) {
+
         if (!empty($day['timeSlots'])) {
             foreach ($day['timeSlots'] as $slot) {
+
+                $s_time = sc_convert_military_to_std($slot['startTime']);
+                $e_time = sc_convert_military_to_std($slot['endTime']);
                 $date = DateTime::createFromFormat('Y-m-d', $day['date']);
-                $label = $date->format('l, F j') . ' – ' . $slot['timeString'];
+                $label = $date->format('l, F j') . '  ' . $s_time . ' - ' . $e_time;
                 $value = $slot['clientStartDate'] . '|' . $slot['clientStartTime'];
-                $formatted_slots[$value] = $label;
+
+                $unit = $slot['units'][0] ?? [];
+                $staff = [
+                    'professionalId' => $unit['professionalId'] ?? null,
+                ];
+
+                $reason = [
+                    'reasonId' => $unit['reasonId'] ?? null,
+                ];
+
+                //Create the appoinment object that will be used to create book the slot
+                $formatted_slots[$value] = array(
+                        'label' => $label,
+                        'startDate'               => $slot['staffStartDate'], //ok.
+                        'endDate'               => $slot['staffEndDate'], //ok.
+                        'startTime'               => $slot['startTime'], //ok.
+                        'endTime'    => $slot['endTime'], //ok.
+                        'businessId'               => 361484, //ok.
+                        'location'              => array('locationId' => $unit['locationId']), //ok.
+                        'staff'              => $staff, //ok.
+                        'reason'              => $reason, //ok.
+                        'clientStartDate'         => $slot['clientStartDate'],//ok.
+                        'clientEndDate'           => $slot['clientEndDate'], //ok.
+                        'clientStartTime'         => $slot['clientStartTime'], //ok.
+                        'clientEndTime'           => $slot['clientEndTime'],//ok.
+                        'remindStaffSmsHrs'       => 1, //ok.
+                        'remindClientSmsHrs'      => 1, //ok.
+                        'staffReminderHours'      => 4, //ok.
+                        'clientReminderHours'     => 4, //ok.
+                        'sendConfirmationToClient'     => true, //ok.
+                        'sendConfirmationToStaff'     => true, //ok.
+                       // 'client'                  => array( 'clientId' => $client_id ),
+                        'status'                  => 'OPEN', //ok.
+                );
             }
         }
     }
@@ -500,11 +517,122 @@ function get_timetap_slots_for_checkout() {
     return $formatted_slots;
 }
 
+
+add_action('woocommerce_checkout_order_processed', 'sc_save_timetap_appointment_data_to_order', 20, 2);
+function sc_save_timetap_appointment_data_to_order($order_id, $posted_data) {
+
+    if (empty($_POST['timetap_slot'])) return;
+
+    $selected_key = sanitize_text_field($_POST['timetap_slot']);
+    $all_slots = WC()->session->get('timetap_all_slots', []);
+    $addr   = WC()->session->get('smartform_addr');
+
+
+    update_post_meta($order_id, 'timetap_slot', $selected_key);
+    update_post_meta($order_id, 'timetap_addr', $addr);
+
+
+    if (isset($all_slots[$selected_key])) {
+        $slot_data = $all_slots[$selected_key];
+
+        // Store full appointment details as meta
+        update_post_meta($order_id, '_timetap_appointment_data', $slot_data);
+
+        // Optional: make a readable version for admin viewing
+        update_post_meta($order_id, '_timetap_appointment_label', $slot_data['label']);
+    }
+}
+
+
+add_action('woocommerce_thankyou', 'sc_handle_timetap_appointment_and_display', 10, 1);
+
+function sc_handle_timetap_appointment_and_display($order_id) {
+    if (!$order_id) return;
+
+    WC()->session->__unset('smart_form_flag');
+
+    $order = wc_get_order($order_id);
+
+    if (!$order) return;
+
+    $slot_key = get_post_meta($order_id, 'timetap_slot', true);
+    if (empty($slot_key)) return;
+
+    // Get the cached slot data (was saved in transient during checkout)
+    $slots  = WC()->session->get('timetap_all_slots', []);
+
+    $slot = $slots[$slot_key] ?? null;
+
+    if (empty($slot)) {
+        echo '<p><strong>Error:</strong> Appointment slot data not found.</p>';
+        return;
+    }
+
+    // Prepare client data
+    $client = [
+        'first_name' => $order->get_billing_first_name(),
+        'last_name'  => $order->get_billing_last_name(),
+        'email'      => $order->get_billing_email(),
+    ];
+
+    $token = sc_timetap_get_token();
+    if (empty($token)) {
+        echo '<p><strong>Error:</strong> Could not authenticate with TimeTap.</p>';
+        return;
+    }
+
+    // Get or create the client
+    $client_id = sc_timetap_client_id($token, $client['email']);
+    if (empty($client_id)) {
+        $client_id = sc_timetap_create_timetap_client($client, $token);
+    }
+
+    if (empty($client_id)) {
+        echo '<p><strong>Error:</strong> Could not create or find the client in TimeTap.</p>';
+        return;
+    }
+
+    // Add client to the appointment slot
+    $slot['client'] = ['clientId' => $client_id];
+
+    $calendar_id = get_post_meta($order_id, '_timetap_calendar_id', true);
+    // Create the appointment
+    if(empty($calendar_id)){
+        $appointment_response = sc_temetap_create_appointment($slot, $token);
+        update_post_meta($order_id, '_timetap_calendar_id', $appointment_response['calendarId']);
+    }
+
+    if (!empty($appointment_response['calendarId']) || !empty($calendar_id)) {
+        echo '<h2>Your Appointment Has Been Booked</h2>';
+        echo '<p><strong>Date:</strong> ' . date('F j, Y', strtotime($slot['clientStartDate'])) . '</p>';
+        echo '<p><strong>Time:</strong> ' . sc_convert_military_to_std($slot['clientStartTime']) . ' - ' . sc_convert_military_to_std($slot['clientEndTime']) . '</p>';
+    }
+}
+
+add_action('woocommerce_admin_order_data_after_order_details', function($order) {
+
+    $note = $order->get_meta('_smartform_security_interest');
+    if ($note) {
+        echo '<p>.</p><p style="margin-top:20px;"><strong>Security Interest:</strong> ' . esc_html($note) . '</p>';
+    }
+
+    $appointment = get_post_meta($order->get_id(),'_timetap_appointment_data', true);
+    $appointment_label = get_post_meta($order->get_id(),'_timetap_appointment_label', true);
+    $addr = get_post_meta($order->get_id(),'timetap_addr', true);
+
+
+    if ($appointment) {
+        echo '<p><strong>Appointment:</strong> '. $appointment_label .'</p>';
+        echo '<p><strong>Service address:</strong> '. $addr .'</p>';
+    }
+});
+
 add_action( 'woocommerce_proceed_to_checkout', 'custom_button_before_checkout', 5 );
 function custom_button_before_checkout() {
 
     $namecr = WC()->session->get('smartform_namecr');
     $addr   = WC()->session->get('smartform_addr');
+    $district   = WC()->session->get('smartform_dist');
     $smart_session   = WC()->session->get('smart_form_flag');
     $smart_form   = isset($_GET['smart_form']) && $_GET['smart_form'] === 'true';
 
@@ -518,6 +646,7 @@ function custom_button_before_checkout() {
     $url = add_query_arg( array(
         'namecr' => urlencode( $namecr ),
         'addr'   => urlencode( $addr ),
+        'dist'   => urlencode( $district ),
     ), site_url( '/service-available/' ) ); // replace with actual page slug
 
    if($smart_form || $smart_session){
@@ -571,18 +700,13 @@ function rename_cart_total_label( $translated_text, $text, $domain ) {
 
     if ( (is_cart() || is_checkout()) && WC()->session->get('smart_form_flag') ) {
         if ( $translated_text === 'Total' && $domain === 'woocommerce' ) {
-
             $translated_text = 'Amount Due Today';
-
         }
 
         if ( $translated_text === 'Subtotal' && $domain === 'woocommerce' ) {
-
             $translated_text = 'Monthly Total';
-
         }
     }
-
 
     return $translated_text;
 }
