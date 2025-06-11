@@ -24,12 +24,13 @@ jQuery(document).ready(function($) {
             if (ui.item.label === 'NO MATCH') {
                 event.preventDefault();
                 $("#no-results-message").show();
-             //   $("#address-input").val('');
                 selectedValid = false;
             } else {
                 $(this).attr('data-district', ui.item.district ? ui.item.district : 3);
                 selectedValid = true;
-                $("#no-results-message").hide();
+                console.log(ui.item.address_id)
+                $('#address-id').val(ui.item.address_id)
+                $("#no-results-message").hide();;
             }
         }
     });
@@ -38,10 +39,11 @@ jQuery(document).ready(function($) {
         e.preventDefault();
         const first = $(".firstname").val().trim();
         const last = $(".lastname").val().trim();
+        const email = $(".email_address").val().trim();
         const addr = $("#address-input").val().trim();
 
-        if (!first || !last || !addr) {
-            alert("Please fill out your name and address.");
+        if (!first || !last || !addr || !email) {
+            alert("Please fill out your name, email and address.");
             return;
         }
 
@@ -49,6 +51,7 @@ jQuery(document).ready(function($) {
             action: "swc_add_interested",
             first: first,
             last: last,
+            email: email,
             address: addr
         }, function(res) {
             if (res.success) {
@@ -63,19 +66,23 @@ jQuery(document).ready(function($) {
 
         const first = $(".firstname").val().trim();
         const last = $(".lastname").val().trim();
+        const email = $(".email_address").val().trim();
         const addr = $("#address-input").val().trim();
+        const addr_id = $("#address-id").val().trim();
         const district = $("#address-input").data('district');
 
-        if (!first || !last || !addr || !selectedValid) {
-            alert("Please select a valid address from the suggestions.");
+        if (!first || !last || !addr || !selectedValid || !email) {
+            alert("Please fill out the fields and select a valid address from the suggestions.");
             return;
         }
 
         const namecr = encodeURIComponent(first + " " + last);
         const address = encodeURIComponent(addr);
         const dist = encodeURIComponent(district);
+        const emailcr = encodeURIComponent(email);
+        const id = encodeURIComponent(addr_id);
 
-        window.location.href = `/service-available/?namecr=${namecr}&addr=${address}&dist=${dist}`;
+        window.location.href = `/service-available/?namecr=${namecr}&addr=${address}&dist=${dist}&email=${emailcr}&id=${addr_id}`;
     });
 
     var $cards = $(".user-type-card");
@@ -114,6 +121,8 @@ jQuery(document).ready(function($) {
         const namecr = $("#namecr_field").val();
         const addr = $("#addr_field").val();
         const dist = $("#dist_field").val();
+        const address_id = $("#addr_id_field").val();
+        const email = $("#email_field").val();
 
         if (!user_type || !internet_use || !family_type || !learning || !wifi_area || !residence_size || !security_interest || !landline) {
             alert("Please complete all fields.");
@@ -136,7 +145,9 @@ jQuery(document).ready(function($) {
                 landline,
                 namecr,
                 addr,
-                dist
+                dist,
+                email,
+                address_id
             },
             success: function (response) {
                 if (response.success && response.data.redirect_url) {
@@ -147,6 +158,41 @@ jQuery(document).ready(function($) {
             },
             error: function () {
                 alert("Error processing your request.");
+            }
+        });
+    });
+
+    $('#copy_service_address').on('click', function (e) {
+        e.preventDefault();
+
+        $.ajax({
+            method: 'POST',
+            url: swcAjax.ajax_url,
+            data: {
+                action: 'get_smartform_address',
+            },
+            success: function (response) {
+                if (response.success) {
+                    const data = response.data;
+                    console.log(data)
+                    // Fill name/email if billing fields are empty
+                    const nameParts = data.name.split(' ');
+                    $('input#billing_first_name').val(nameParts[0] || '');
+                    $('input#billing_last_name').val(nameParts.slice(1).join(' ') || '');
+
+                    $('input#billing_email').val(data.email);
+
+                    // Fill address fields
+                    $('input#billing_address_1').val(data.address);
+                    $('input#billing_city').val(data.city);
+                    $('input#billing_postcode').val(data.zip);
+                    $('select#billing_state').val(data.state).trigger('change');
+                } else {
+                    alert(response.data.message || 'Could not retrieve service address.');
+                }
+            },
+            error: function () {
+                alert('Error retrieving address.');
             }
         });
     });

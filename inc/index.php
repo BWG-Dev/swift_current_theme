@@ -187,6 +187,8 @@ function render_smart_form_shortcode() {
         ?>
         <input type="hidden" id="namecr_field" name="namecr" value="<?php echo esc_attr($_GET['namecr']); ?>">
         <input type="hidden" id="addr_field" name="addr_field" value="<?php echo esc_attr($_GET['addr']); ?>">
+        <input type="hidden" id="addr_id_field" name="addr_field" value="<?php echo esc_attr($_GET['id']); ?>">
+        <input type="hidden" id="email_field" name="addr_field" value="<?php echo esc_attr($_GET['email']); ?>">
         <input type="hidden" id="dist_field" name="addr_field" value="<?php echo esc_attr($_GET['dist']); ?>">
         <div class="smart-from-group button-action">
             <button type="button" class="smart-form-button">Build <?php echo esc_attr($_GET['namecr']); ?> Family Service Plan</button>
@@ -223,6 +225,8 @@ function handle_smart_form_logic() {
     $name = sanitize_text_field($_POST['namecr']);
     $address = sanitize_text_field($_POST['addr']);
     $district = sanitize_text_field($_POST['dist']);
+    $address_id = sanitize_text_field($_POST['address_id']);
+    $email = sanitize_text_field($_POST['email']);
 
     // Start by clearing the cart
     WC()->cart->empty_cart();
@@ -314,6 +318,8 @@ function handle_smart_form_logic() {
 
     WC()->session->set( 'smartform_namecr', $name );
     WC()->session->set( 'smartform_addr', $address );
+    WC()->session->set( 'smartform_addr_id', $address_id );
+    WC()->session->set( 'smartform_email', $email );
     WC()->session->set( 'smartform_dist', $district );
 
     wp_send_json_success(['redirect_url' => wc_get_cart_url() . '?smart_form=true']);
@@ -326,7 +332,29 @@ add_action('woocommerce_checkout_create_order', function($order, $data) {
     }
 }, 10, 2);
 
+add_action('woocommerce_before_checkout_billing_form', 'add_copy_service_address_link');
+function add_copy_service_address_link() {
+    echo '<p><a href="#" id="copy_service_address" style="font-weight:bold;">📋 Copy from Service Address</a></p>';
+}
 
+add_action('wp_ajax_get_smartform_address', 'get_smartform_address');
+add_action('wp_ajax_nopriv_get_smartform_address', 'get_smartform_address');
+
+function get_smartform_address() {
+    global $wpdb;
+
+
+    $name = WC()->session->get( 'smartform_namecr' );
+    $addr_id = WC()->session->get( 'smartform_addr_id' );
+    $email = WC()->session->get( 'smartform_email' );
+
+    $row = $wpdb->get_row($wpdb->prepare("SELECT * FROM swc_locations WHERE nisc_srv_loc_nbr = %d", $addr_id), ARRAY_A);
+    if ($row) {
+        wp_send_json_success(array('email' =>$email, 'name' => $name, 'address' => $row['nisc_addr1'], 'city' => $row['nisc_city'], 'state' => $row['nisc_st'], 'zip' => $row['nisc_zip'], 'district' => $row['swc_ftech_district']));
+    } else {
+        wp_send_json_error(['message' => 'Address not found.']);
+    }
+}
 
 //Ajjax call - address suggestions
 add_action('wp_ajax_nopriv_swc_address_search', 'swc_address_search');
@@ -337,7 +365,7 @@ function swc_address_search() {
     $query = sanitize_text_field($_POST['query']);
     $table = 'swc_locations';
 
-    $sql = $wpdb->prepare("SELECT DISTINCT nisc_addr1, nisc_city, nisc_st, nisc_zip, swc_ftech_district 
+    $sql = $wpdb->prepare("SELECT DISTINCT nisc_srv_loc_nbr, nisc_addr1, nisc_city, nisc_st, nisc_zip, swc_ftech_district 
                            FROM $table 
                            WHERE CONCAT(nisc_addr1, ' ', nisc_city, ' ', nisc_st, ' ', nisc_zip) 
                            LIKE %s 
@@ -348,7 +376,7 @@ function swc_address_search() {
 
     foreach ($results as $row) {
         $address = "{$row->nisc_addr1}, {$row->nisc_city}, {$row->nisc_st} {$row->nisc_zip}";
-        $data[] = ['label' => $address, 'value' => $address, 'district' => $row->swc_ftech_district];
+        $data[] = ['label' => $address, 'value' => $address, 'district' => $row->swc_ftech_district, 'address_id' => $row->nisc_srv_loc_nbr];
     }
 
     if (empty($data)) {
@@ -368,11 +396,13 @@ function swc_add_interested() {
 
     $first  = sanitize_text_field($_POST['first']);
     $last   = sanitize_text_field($_POST['last']);
+    $email   = sanitize_text_field($_POST['email']);
     $address = sanitize_text_field($_POST['address']);
 
     $wpdb->insert($table, [
         'first'  => $first,
         'last'   => $last,
+        'email'   => $email,
         'address'=> $address
     ]);
 
@@ -405,11 +435,11 @@ add_action('woocommerce_cart_calculate_fees', function($cart) {
 
 //Add  the timeslot date *required
 
-add_filter('woocommerce_checkout_fields', 'add_timetap_slot_field_to_checkout');
+//add_filter('woocommerce_checkout_fields', 'add_timetap_slot_field_to_checkout');
 function add_timetap_slot_field_to_checkout($fields) {
     $slots = get_timetap_slots_for_checkout();
     //$slots = [];
-
+    var_dump($slots);
     if (!empty($slots)) {
         // 1. Build the select field options
         $select_options = ['' => 'Choose a time slot'];
@@ -436,12 +466,11 @@ function get_timetap_slots_for_checkout() {
     $cached = get_transient('timetap_checkout_slots');
     //if ($cached) return $cached;
 
-
-
     $locationId = '498109';
     $serviceId = '725333';
 
     $district   = WC()->session->get('smartform_dist');
+
 
     if(!empty($district) && intval($district) == 2){
         $serviceId = '725510';
@@ -453,7 +482,6 @@ function get_timetap_slots_for_checkout() {
 
 
     $token = sc_timetap_get_token();
-
 
     if(empty($token)){
         return [];
@@ -634,6 +662,8 @@ function custom_button_before_checkout() {
     $addr   = WC()->session->get('smartform_addr');
     $district   = WC()->session->get('smartform_dist');
     $smart_session   = WC()->session->get('smart_form_flag');
+    $email   = WC()->session->get('smartform_email');
+    $id   = WC()->session->get('smartform_addr_id');
     $smart_form   = isset($_GET['smart_form']) && $_GET['smart_form'] === 'true';
 
 
@@ -647,6 +677,8 @@ function custom_button_before_checkout() {
         'namecr' => urlencode( $namecr ),
         'addr'   => urlencode( $addr ),
         'dist'   => urlencode( $district ),
+        'email'   => urlencode( $email ),
+        'id'   => urlencode( $id ),
     ), site_url( '/service-available/' ) ); // replace with actual page slug
 
    if($smart_form || $smart_session){
@@ -714,4 +746,16 @@ function rename_cart_total_label( $translated_text, $text, $domain ) {
 // Optional: emphasize styling for total line
 function custom_due_today_total_html( $value ) {
     return '<strong>' . $value . '</strong>';
+}
+
+add_filter('woocommerce_cart_item_remove_link', 'prevent_product_removal_from_cart', 10, 2);
+function prevent_product_removal_from_cart($link, $cart_item_key) {
+    $cart_item = WC()->cart->get_cart_item($cart_item_key);
+    $product_id_to_protect = [1260, 1478, 1479,1476,1475]; // Replace with your product ID
+
+    if (in_array($cart_item['product_id'], $product_id_to_protect)) {
+        return ''; // Removes the "Remove" link
+    }
+
+    return $link;
 }

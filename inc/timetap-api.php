@@ -30,6 +30,8 @@ function sc_timetap_get_token(){
 
     $response_std = json_decode($response, true);
 
+    var_dump($response_std);
+
     $token = isset($response_std['sessionToken']) ? $response_std['sessionToken'] : '';
 
     if(empty($token)){

@@ -17,7 +17,6 @@ if ( ! defined( 'ABSPATH' ) ) {
 require get_stylesheet_directory() . '/inc/index.php';
 require get_stylesheet_directory() . '/inc/timetap-api.php';
 
-
 define( 'HELLO_ELEMENTOR_CHILD_VERSION', '2.0.0' );
 
 /**
