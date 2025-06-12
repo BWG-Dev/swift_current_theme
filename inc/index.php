@@ -2,12 +2,18 @@
 
 function swc_enqueue_scripts() {
     wp_enqueue_script('jquery-ui-autocomplete');
+
+    if (is_checkout()) {
+        wp_enqueue_style('flatpickr-css', 'https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css');
+        wp_enqueue_script('flatpickr-js', 'https://cdn.jsdelivr.net/npm/flatpickr', [], null, true);
+    }
+
     wp_enqueue_script('swc-autocomplete', get_stylesheet_directory_uri() . '/inc/main.js', ['jquery', 'jquery-ui-autocomplete'], null, true);
 
     wp_enqueue_style('swc-style',  get_stylesheet_directory_uri() . '/inc/style.css',  [],  '1.0.0' );
 
     wp_localize_script('swc-autocomplete', 'swcAjax', [
-        'ajax_url' => admin_url('admin-ajax.php')
+        'ajax_url' => admin_url('admin-ajax.php'),
     ]);
 
     wp_enqueue_style('jquery-ui-style', 'https://code.jquery.com/ui/1.13.2/themes/base/jquery-ui.css');
@@ -435,24 +441,39 @@ add_action('woocommerce_cart_calculate_fees', function($cart) {
 
 //Add  the timeslot date *required
 
-//add_filter('woocommerce_checkout_fields', 'add_timetap_slot_field_to_checkout');
+add_filter('woocommerce_checkout_fields', 'add_timetap_slot_field_to_checkout');
 function add_timetap_slot_field_to_checkout($fields) {
-    $slots = get_timetap_slots_for_checkout();
+    $slots = get_timetap_slots_for_checkout()['all_slots'];
     //$slots = [];
-    var_dump($slots);
     if (!empty($slots)) {
-        // 1. Build the select field options
-        $select_options = ['' => 'Choose a time slot'];
+        /*$select_options = ['' => 'Choose a time slot'];
         foreach ($slots as $key => $slot) {
             $select_options[$key] = $slot['label'];
         }
 
-        // 2. Add visible dropdown for selection
         $fields['billing']['timetap_slot'] = [
             'type'     => 'select',
             'label'    => __('Select Appointment Time', 'woocommerce'),
             'required' => true,
             'options'  => $select_options,
+        ];*/
+
+        $fields['billing']['appointment_date'] = [
+            'type'        => 'text',
+            'label'       => __('Select Appointment Date', 'woocommerce'),
+            'required'    => true,
+            'class'       => ['form-row-first'],
+            'input_class' => ['timetap-date']
+        ];
+
+        // Time dropdown field (populated by JS after date is picked)
+        $fields['billing']['timetap_slot'] = [
+            'type'        => 'select',
+            'label'       => __('Select Appointment Time', 'woocommerce'),
+            'required'    => true,
+            'class'       => ['form-row-last'],
+            'options'     => ['' => __('Select a time')],
+            'input_class' => ['timetap-time']
         ];
 
         // 3. Store all slot details in session for retrieval after order is placed
@@ -460,6 +481,44 @@ function add_timetap_slot_field_to_checkout($fields) {
     }
 
     return $fields;
+}
+
+add_action('wp_footer', 'custom_timetap_script');
+function custom_timetap_script() {
+    if (!is_checkout()) return;
+
+    $available_slots = get_timetap_slots_for_checkout()['dates'];
+
+    ?>
+    <script>
+        jQuery(function($) {
+            const availableSlots = <?php echo json_encode($available_slots); ?>;
+            const $date = $('.timetap-date');
+            const $time = $('.timetap-time');
+
+            $date.flatpickr({
+                dateFormat: "Y-m-d",
+                enable: Object.keys(availableSlots),
+                onChange: function(selectedDates, dateStr) {
+                    $time.empty().append('<option value="">Select a time</option>');
+
+                    if (availableSlots[dateStr]) {
+                        $.each(availableSlots[dateStr], function(_, timeRaw) {
+                            let timeStr = timeRaw.toString().padStart(4, '0'); // e.g., 830 -> "0830"
+                            let hours = parseInt(timeStr.substring(0, 2), 10);
+                            let minutes = timeStr.substring(2);
+                            let suffix = hours >= 12 ? 'PM' : 'AM';
+                            let displayHours = hours % 12 || 12; // convert to 12-hour format
+                            let timeFormatted = `${displayHours}:${minutes} ${suffix}`;
+                            let key = `${dateStr}|${timeRaw}`;
+                            $time.append(`<option value="${key}">${timeFormatted}</option>`);
+                        });
+                    }
+                }
+            });
+        });
+    </script>
+    <?php
 }
 
 function get_timetap_slots_for_checkout() {
@@ -490,11 +549,14 @@ function get_timetap_slots_for_checkout() {
     $slots_data = sc_timetap_get_slots($token, $locationId, $serviceId );
 
     $formatted_slots = [];
+    $slots_dates = [];
 
     foreach ($slots_data as $day) {
 
         if (!empty($day['timeSlots'])) {
             foreach ($day['timeSlots'] as $slot) {
+
+                $slots_dates[$slot['clientStartDate']][] =  $slot['clientStartTime'];
 
                 $s_time = sc_convert_military_to_std($slot['startTime']);
                 $e_time = sc_convert_military_to_std($slot['endTime']);
@@ -511,7 +573,7 @@ function get_timetap_slots_for_checkout() {
                     'reasonId' => $unit['reasonId'] ?? null,
                 ];
 
-                //Create the appoinment object that will be used to create book the slot
+                //Create the appoiment object that will be used to create book the slot
                 $formatted_slots[$value] = array(
                         'label' => $label,
                         'startDate'               => $slot['staffStartDate'], //ok.
@@ -542,7 +604,7 @@ function get_timetap_slots_for_checkout() {
     // Cache for 10 minutes
     set_transient('timetap_checkout_slots', $formatted_slots, 10 * MINUTE_IN_SECONDS);
 
-    return $formatted_slots;
+    return array('all_slots' => $formatted_slots, 'dates' => $slots_dates);
 }
 
 
