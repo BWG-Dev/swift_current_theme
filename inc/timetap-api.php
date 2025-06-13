@@ -42,7 +42,7 @@ function sc_timetap_get_token(){
 
 function sc_timetap_get_slots($token, $locationId, $serviceId){
     $startDate = date('Y-m-d');
-    $endDate = date('Y-m-d', strtotime('+7 days'));
+    $endDate = date('Y-m-d', strtotime('+21 days'));
     $slots_url = "https://api.timetap.com/test/availability/location/$locationId/service/$serviceId?startDate=$startDate&endDate=$endDate";
 
     $slots_response = wp_remote_get($slots_url, [

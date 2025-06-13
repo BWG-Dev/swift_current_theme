@@ -821,3 +821,67 @@ function prevent_product_removal_from_cart($link, $cart_item_key) {
 
     return $link;
 }
+
+add_action('woocommerce_after_cart', 'custom_cart_upsell_vertical_display');
+
+function custom_cart_upsell_vertical_display() {
+    $excluded_product_ids = array(123, 456); // Product IDs you want to exclude
+    $upsell_ids = [];
+
+    foreach (WC()->cart->get_cart() as $cart_item) {
+        $product = wc_get_product($cart_item['product_id']);
+
+        if (in_array($product->get_id(), $excluded_product_ids)) {
+            continue;
+        }
+
+        $product_upsells = $product->get_upsell_ids();
+        $upsell_ids = array_merge($upsell_ids, $product_upsells);
+    }
+
+    $upsell_ids = array_unique(array_filter($upsell_ids));
+
+    if (empty($upsell_ids)) {
+        return;
+    }
+
+    echo '<div class="custom-upsell-products" style="margin-top:40px;">';
+    echo '<h2 style="margin-bottom:20px;">You may also like</h2>';
+
+    $args = [
+        'post_type' => 'product',
+        'post__in' => $upsell_ids,
+        'posts_per_page' => -1,
+        'orderby' => 'post__in',
+    ];
+
+    $query = new WP_Query($args);
+
+    $cont = 0;
+
+    while ($query->have_posts()) : $query->the_post();
+        global $product;
+
+        if($cont == 3){
+            break;
+        }
+
+        echo '<div class="upsell-product" style="display:flex; align-items:center; margin-bottom:20px; border:1px solid #ccc; padding:10px; border-radius:8px;">';
+
+        echo '<div class="upsell-image" style="flex:0 0 100px; margin-right:15px;">';
+        echo woocommerce_get_product_thumbnail('woocommerce_thumbnail');
+        echo '</div>';
+
+        echo '<div class="upsell-info" style="flex:1;">';
+        echo '<h3 style="margin:0 0 10px;">' . get_the_title() . '</h3>';
+        woocommerce_template_loop_add_to_cart();
+        echo '</div>';
+
+        echo '</div>';
+        $cont++;
+    endwhile;
+
+    wp_reset_postdata();
+
+    echo '</div>';
+}
